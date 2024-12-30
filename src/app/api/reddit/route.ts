@@ -198,6 +198,38 @@ async function searchReddit(query: string, timeRange: 'day' | 'week' | 'month'):
   }
 }
 
+async function formatRedditGossip(post: any, comments: string[]): Promise<string> {
+  try {
+    const context = `
+    Title: ${post.title}
+    Content: ${post.selftext || ''}
+    ${comments.length > 0 ? `\nTop comments:\n${comments.join('\n')}` : ''}
+    `;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: "You are a gossip columnist who creates engaging, juicy gossip stories from Reddit posts. Keep the core facts the same but make it more entertaining and gossip-like."
+        },
+        {
+          role: "user",
+          content: `Transform this Reddit content into a juicy gossip story. Keep it factual but make it more engaging and gossip-like:\n${context}`
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 200,
+    });
+
+    return response.choices[0].message.content?.trim() || post.title;
+  } catch (error) {
+    console.error('Error formatting Reddit gossip:', error);
+    // Fallback to a simple format if OpenAI fails
+    return `${post.title}${post.selftext ? ` - ${post.selftext.slice(0, 200)}...` : ''}`;
+  }
+}
+
 async function generateFakeGossip(realGossip: string, topic: string, topComments: string[] = [], isPartialMatch: boolean = false) {
   try {
     const matchContext = isPartialMatch 
@@ -296,35 +328,40 @@ export async function GET(request: Request) {
 
     // Select the post with highest engagement score
     const selectedPost = posts[0];
-    const realGossip = selectedPost.title + (selectedPost.selftext ? ` ${selectedPost.selftext}` : '');
+    
+    // Format the real Reddit content into a proper gossip story
+    const realGossip = await formatRedditGossip(selectedPost, selectedPost.topComments);
 
-    // Generate fake gossip using both the post and top comments
-    const fakeGossip = await generateFakeGossip(realGossip, topic, selectedPost.topComments, selectedPost.isPartialMatch);
+    // Generate two different fake gossip stories
+    const fakeGossip1 = await generateFakeGossip(realGossip, topic, selectedPost.topComments, selectedPost.isPartialMatch);
+    const fakeGossip2 = await generateFakeGossip(realGossip, topic, selectedPost.topComments, selectedPost.isPartialMatch);
 
-    // Randomly decide whether to show the real gossip first or second
-    const isRealFirst = Math.random() < 0.5;
-    const stories = [
-      {
-        content: isRealFirst ? realGossip : fakeGossip,
-        isReal: isRealFirst,
-        redditUrl: isRealFirst ? `https://reddit.com${selectedPost.permalink}` : undefined,
-        engagementScore: isRealFirst ? selectedPost.engagementScore : undefined,
-        isPartialMatch: selectedPost.isPartialMatch,
-        mainSubject: selectedPost.mainSubject
-      },
-      {
-        content: isRealFirst ? fakeGossip : realGossip,
-        isReal: !isRealFirst,
-        redditUrl: !isRealFirst ? `https://reddit.com${selectedPost.permalink}` : undefined,
-        engagementScore: !isRealFirst ? selectedPost.engagementScore : undefined,
-        isPartialMatch: selectedPost.isPartialMatch,
-        mainSubject: selectedPost.mainSubject
+    // Randomly position the real story among the fake ones
+    const correctIndex = Math.floor(Math.random() * 3);
+    const stories = Array(3).fill(null).map((_, index) => {
+      if (index === correctIndex) {
+        return {
+          content: realGossip,
+          isReal: true,
+          redditUrl: `https://reddit.com${selectedPost.permalink}`,
+          engagementScore: selectedPost.engagementScore,
+          isPartialMatch: selectedPost.isPartialMatch,
+          mainSubject: selectedPost.mainSubject
+        };
+      } else {
+        return {
+          content: index < correctIndex ? fakeGossip1 : fakeGossip2,
+          isReal: false,
+          engagementScore: undefined,
+          isPartialMatch: selectedPost.isPartialMatch,
+          mainSubject: selectedPost.mainSubject
+        };
       }
-    ];
+    });
 
     return NextResponse.json({
       stories,
-      correctIndex: isRealFirst ? 0 : 1,
+      correctIndex,
       originalTopic: topic,
       mainSubject: selectedPost.mainSubject,
       isPartialMatch: selectedPost.isPartialMatch
