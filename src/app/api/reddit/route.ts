@@ -287,10 +287,48 @@ function shuffleArray<T>(array: T[]): T[] {
   return shuffled;
 }
 
-async function generateStories(posts: any[], topic: string) {
+// Cache to store recently used stories
+const recentStoriesCache = new Map<string, Set<string>>();
+
+// Clean up old entries periodically (keep last 1 hour)
+setInterval(() => {
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  for (const [key, value] of recentStoriesCache.entries()) {
+    if (parseInt(key.split('_')[1]) < oneHourAgo) {
+      recentStoriesCache.delete(key);
+    }
+  }
+}, 5 * 60 * 1000); // Clean every 5 minutes
+
+function isStoryRecent(userId: string, storyId: string): boolean {
+  const userRecentStories = Array.from(recentStoriesCache.entries())
+    .filter(([key]) => key.startsWith(userId))
+    .map(([_, stories]) => Array.from(stories))
+    .flat();
+  
+  return userRecentStories.includes(storyId);
+}
+
+function addToRecentStories(userId: string, storyIds: string[]) {
+  const timestamp = Date.now();
+  const key = `${userId}_${timestamp}`;
+  recentStoriesCache.set(key, new Set(storyIds));
+}
+
+function getStoryId(post: any): string {
+  return `${post.subreddit}_${post.id}`;
+}
+
+async function generateStories(posts: any[], topic: string, userId: string) {
   try {
-    // Get top 3 posts by engagement
-    const topPosts = posts.slice(0, 3);
+    // Filter out recently shown posts
+    const freshPosts = posts.filter(post => !isStoryRecent(userId, getStoryId(post)));
+    
+    // If we don't have enough fresh posts, fetch more or use older ones
+    const postsToUse = freshPosts.length >= 3 ? freshPosts : posts;
+    
+    // Get top posts by engagement
+    const topPosts = postsToUse.slice(0, Math.min(5, postsToUse.length));
     
     // Format each Reddit post into a gossip story
     const formattedStories = await Promise.all(
@@ -300,7 +338,7 @@ async function generateStories(posts: any[], topic: string) {
     // Generate fake versions for each story
     const fakeStories = await Promise.all(
       formattedStories.map(story => 
-        generateFakeGossip(story, topic, [], posts[0].isPartialMatch)
+        generateFakeGossip(story, topic, [], postsToUse[0].isPartialMatch)
       )
     );
 
@@ -313,14 +351,16 @@ async function generateStories(posts: any[], topic: string) {
         engagementScore: post.engagementScore,
         isPartialMatch: post.isPartialMatch,
         mainSubject: post.mainSubject,
-        subreddit: post.subreddit
+        subreddit: post.subreddit,
+        storyId: getStoryId(post)
       })),
-      ...fakeStories.map(story => ({
+      ...fakeStories.map((story, index) => ({
         content: story,
         isReal: false,
         engagementScore: undefined,
-        isPartialMatch: posts[0].isPartialMatch,
-        mainSubject: posts[0].mainSubject
+        isPartialMatch: postsToUse[0].isPartialMatch,
+        mainSubject: postsToUse[0].mainSubject,
+        storyId: `fake_${topic}_${index}_${Date.now()}`
       }))
     ];
 
@@ -334,7 +374,17 @@ async function generateStories(posts: any[], topic: string) {
     if (!hasRealStory) {
       // Replace a random fake story with the highest-engagement real story
       const randomIndex = Math.floor(Math.random() * 3);
-      selectedStories[randomIndex] = shuffledStories.find(story => story.isReal)!;
+      const realStory = shuffledStories.find(story => story.isReal)!;
+      selectedStories[randomIndex] = realStory;
+    }
+
+    // Add selected real stories to recent cache
+    const selectedRealStoryIds = selectedStories
+      .filter(story => story.isReal)
+      .map(story => story.storyId);
+    
+    if (selectedRealStoryIds.length > 0) {
+      addToRecentStories(userId, selectedRealStoryIds);
     }
 
     return {
@@ -351,6 +401,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const topic = url.searchParams.get('topic');
+    const userId = url.searchParams.get('userId') || 'anonymous';
 
     if (!topic) {
       try {
@@ -387,14 +438,15 @@ export async function GET(request: Request) {
     }
 
     // Generate stories using multiple Reddit posts
-    const { stories, correctIndex } = await generateStories(posts, topic);
+    const { stories, correctIndex } = await generateStories(posts, topic, userId);
 
     return NextResponse.json({
       stories,
       correctIndex,
       originalTopic: topic,
       mainSubject: posts[0].mainSubject,
-      isPartialMatch: posts[0].isPartialMatch
+      isPartialMatch: posts[0].isPartialMatch,
+      hasRecentStories: stories.some(story => story.isReal && isStoryRecent(userId, story.storyId))
     });
   } catch (error) {
     console.error('API error:', error);
