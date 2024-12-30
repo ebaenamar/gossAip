@@ -13,6 +13,7 @@ interface GossipResponse {
   topic: string;
   stories: Story[];
   correctIndex: number;
+  newStoryIds?: string[];
 }
 
 export default function GossipGame() {
@@ -28,6 +29,7 @@ export default function GossipGame() {
   const [score, setScore] = useState(0);
   const [attempts, setAttempts] = useState(0);
   const [gameOver, setGameOver] = useState(false);
+  const [recentStories, setRecentStories] = useState<string[]>([]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -45,20 +47,51 @@ export default function GossipGame() {
     return () => clearInterval(timer);
   }, [gameStarted, gameOver, timeLeft]);
 
+  useEffect(() => {
+    const stored = localStorage.getItem('recentStories');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        const oneHourAgo = Date.now() - 60 * 60 * 1000;
+        const recent = parsed.filter((item: {id: string, timestamp: number}) => 
+          item.timestamp > oneHourAgo
+        );
+        setRecentStories(recent.map((item: {id: string}) => item.id));
+        localStorage.setItem('recentStories', JSON.stringify(recent));
+      } catch (e) {
+        console.error('Error parsing recent stories:', e);
+        localStorage.removeItem('recentStories');
+      }
+    }
+  }, []);
+
   const fetchGossip = async (searchTopic: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/reddit?topic=${encodeURIComponent(searchTopic)}`);
-      if (!response.ok) {
-        const data = await response.json();
-        if (data.suggestion) {
-          setTopic(data.suggestion);
-        }
+      const response = await fetch(
+        `/api/reddit?topic=${encodeURIComponent(searchTopic)}&recentStories=${encodeURIComponent(JSON.stringify(recentStories))}`
+      );
+      const data: GossipResponse = await response.json();
+
+      if (data.error) {
         throw new Error(data.error || 'Failed to fetch gossip');
       }
-      const data: GossipResponse = await response.json();
+
       setStories(data.stories);
       setCorrectIndex(data.correctIndex);
+
+      if (data.newStoryIds && data.newStoryIds.length > 0) {
+        const newRecent = [
+          ...recentStories,
+          ...data.newStoryIds.map((id: string) => ({
+            id,
+            timestamp: Date.now()
+          }))
+        ];
+        setRecentStories(newRecent.map(item => item.id));
+        localStorage.setItem('recentStories', JSON.stringify(newRecent));
+      }
+
       setSelectedIndex(-1);
       setRevealed(false);
     } catch (error) {

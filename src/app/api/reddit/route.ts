@@ -287,44 +287,14 @@ function shuffleArray<T>(array: T[]): T[] {
   return shuffled;
 }
 
-// Cache to store recently used stories
-const recentStoriesCache = new Map<string, Set<string>>();
-
-// Clean up old entries periodically (keep last 1 hour)
-setInterval(() => {
-  const oneHourAgo = Date.now() - 60 * 60 * 1000;
-  for (const [key, value] of recentStoriesCache.entries()) {
-    if (parseInt(key.split('_')[1]) < oneHourAgo) {
-      recentStoriesCache.delete(key);
-    }
-  }
-}, 5 * 60 * 1000); // Clean every 5 minutes
-
-function isStoryRecent(userId: string, storyId: string): boolean {
-  const userRecentStories = Array.from(recentStoriesCache.entries())
-    .filter(([key]) => key.startsWith(userId))
-    .map(([_, stories]) => Array.from(stories))
-    .flat();
-  
-  return userRecentStories.includes(storyId);
-}
-
-function addToRecentStories(userId: string, storyIds: string[]) {
-  const timestamp = Date.now();
-  const key = `${userId}_${timestamp}`;
-  recentStoriesCache.set(key, new Set(storyIds));
-}
-
-function getStoryId(post: any): string {
-  return `${post.subreddit}_${post.id}`;
-}
-
-async function generateStories(posts: any[], topic: string, userId: string) {
+async function generateStories(posts: any[], topic: string, recentStoryIds: string[] = []) {
   try {
-    // Filter out recently shown posts
-    const freshPosts = posts.filter(post => !isStoryRecent(userId, getStoryId(post)));
+    // Filter out recently shown posts if recentStoryIds provided
+    const freshPosts = recentStoryIds.length > 0 
+      ? posts.filter(post => !recentStoryIds.includes(`${post.subreddit}_${post.id}`))
+      : posts;
     
-    // If we don't have enough fresh posts, fetch more or use older ones
+    // If we don't have enough fresh posts, use all posts
     const postsToUse = freshPosts.length >= 3 ? freshPosts : posts;
     
     // Get top posts by engagement
@@ -352,7 +322,7 @@ async function generateStories(posts: any[], topic: string, userId: string) {
         isPartialMatch: post.isPartialMatch,
         mainSubject: post.mainSubject,
         subreddit: post.subreddit,
-        storyId: getStoryId(post)
+        storyId: `${post.subreddit}_${post.id}`
       })),
       ...fakeStories.map((story, index) => ({
         content: story,
@@ -378,18 +348,15 @@ async function generateStories(posts: any[], topic: string, userId: string) {
       selectedStories[randomIndex] = realStory;
     }
 
-    // Add selected real stories to recent cache
-    const selectedRealStoryIds = selectedStories
+    // Return new story IDs to be cached on client side
+    const newStoryIds = selectedStories
       .filter(story => story.isReal)
       .map(story => story.storyId);
-    
-    if (selectedRealStoryIds.length > 0) {
-      addToRecentStories(userId, selectedRealStoryIds);
-    }
 
     return {
       stories: selectedStories,
-      correctIndex: selectedStories.findIndex(story => story.isReal)
+      correctIndex: selectedStories.findIndex(story => story.isReal),
+      newStoryIds
     };
   } catch (error) {
     console.error('Error generating stories:', error);
@@ -401,7 +368,9 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const topic = url.searchParams.get('topic');
-    const userId = url.searchParams.get('userId') || 'anonymous';
+    const recentStoryIds = url.searchParams.get('recentStories') 
+      ? JSON.parse(url.searchParams.get('recentStories')!)
+      : [];
 
     if (!topic) {
       try {
@@ -438,7 +407,7 @@ export async function GET(request: Request) {
     }
 
     // Generate stories using multiple Reddit posts
-    const { stories, correctIndex } = await generateStories(posts, topic, userId);
+    const { stories, correctIndex, newStoryIds } = await generateStories(posts, topic, recentStoryIds);
 
     return NextResponse.json({
       stories,
@@ -446,7 +415,7 @@ export async function GET(request: Request) {
       originalTopic: topic,
       mainSubject: posts[0].mainSubject,
       isPartialMatch: posts[0].isPartialMatch,
-      hasRecentStories: stories.some(story => story.isReal && isStoryRecent(userId, story.storyId))
+      newStoryIds // Client will add these to their localStorage
     });
   } catch (error) {
     console.error('API error:', error);
