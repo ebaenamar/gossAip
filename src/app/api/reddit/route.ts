@@ -287,6 +287,66 @@ function shuffleArray<T>(array: T[]): T[] {
   return shuffled;
 }
 
+async function generateStories(posts: any[], topic: string) {
+  try {
+    // Get top 3 posts by engagement
+    const topPosts = posts.slice(0, 3);
+    
+    // Format each Reddit post into a gossip story
+    const formattedStories = await Promise.all(
+      topPosts.map(post => formatRedditGossip(post, post.topComments))
+    );
+
+    // Generate fake versions for each story
+    const fakeStories = await Promise.all(
+      formattedStories.map(story => 
+        generateFakeGossip(story, topic, [], posts[0].isPartialMatch)
+      )
+    );
+
+    // Create array of all possible stories with their metadata
+    const allStories = [
+      ...topPosts.map((post, index) => ({
+        content: formattedStories[index],
+        isReal: true,
+        redditUrl: `https://reddit.com${post.permalink}`,
+        engagementScore: post.engagementScore,
+        isPartialMatch: post.isPartialMatch,
+        mainSubject: post.mainSubject,
+        subreddit: post.subreddit
+      })),
+      ...fakeStories.map(story => ({
+        content: story,
+        isReal: false,
+        engagementScore: undefined,
+        isPartialMatch: posts[0].isPartialMatch,
+        mainSubject: posts[0].mainSubject
+      }))
+    ];
+
+    // Shuffle all stories
+    const shuffledStories = shuffleArray(allStories);
+
+    // Select 3 stories, ensuring at least one is real
+    let selectedStories = shuffledStories.slice(0, 3);
+    const hasRealStory = selectedStories.some(story => story.isReal);
+    
+    if (!hasRealStory) {
+      // Replace a random fake story with the highest-engagement real story
+      const randomIndex = Math.floor(Math.random() * 3);
+      selectedStories[randomIndex] = shuffledStories.find(story => story.isReal)!;
+    }
+
+    return {
+      stories: selectedStories,
+      correctIndex: selectedStories.findIndex(story => story.isReal)
+    };
+  } catch (error) {
+    console.error('Error generating stories:', error);
+    throw error;
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -326,45 +386,15 @@ export async function GET(request: Request) {
       );
     }
 
-    // Select the post with highest engagement score
-    const selectedPost = posts[0];
-    
-    // Format the real Reddit content into a proper gossip story
-    const realGossip = await formatRedditGossip(selectedPost, selectedPost.topComments);
-
-    // Generate two different fake gossip stories
-    const fakeGossip1 = await generateFakeGossip(realGossip, topic, selectedPost.topComments, selectedPost.isPartialMatch);
-    const fakeGossip2 = await generateFakeGossip(realGossip, topic, selectedPost.topComments, selectedPost.isPartialMatch);
-
-    // Randomly position the real story among the fake ones
-    const correctIndex = Math.floor(Math.random() * 3);
-    const stories = Array(3).fill(null).map((_, index) => {
-      if (index === correctIndex) {
-        return {
-          content: realGossip,
-          isReal: true,
-          redditUrl: `https://reddit.com${selectedPost.permalink}`,
-          engagementScore: selectedPost.engagementScore,
-          isPartialMatch: selectedPost.isPartialMatch,
-          mainSubject: selectedPost.mainSubject
-        };
-      } else {
-        return {
-          content: index < correctIndex ? fakeGossip1 : fakeGossip2,
-          isReal: false,
-          engagementScore: undefined,
-          isPartialMatch: selectedPost.isPartialMatch,
-          mainSubject: selectedPost.mainSubject
-        };
-      }
-    });
+    // Generate stories using multiple Reddit posts
+    const { stories, correctIndex } = await generateStories(posts, topic);
 
     return NextResponse.json({
       stories,
       correctIndex,
       originalTopic: topic,
-      mainSubject: selectedPost.mainSubject,
-      isPartialMatch: selectedPost.isPartialMatch
+      mainSubject: posts[0].mainSubject,
+      isPartialMatch: posts[0].isPartialMatch
     });
   } catch (error) {
     console.error('API error:', error);
