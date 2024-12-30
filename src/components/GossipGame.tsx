@@ -7,29 +7,40 @@ interface Story {
   content: string;
   isReal: boolean;
   redditUrl?: string;
+  engagementScore?: number;
+  isPartialMatch?: boolean;
+  mainSubject?: string;
+  subreddit?: string;
+  storyId: string;
 }
 
 interface GossipResponse {
-  topic: string;
-  stories: Story[];
-  correctIndex: number;
+  stories?: Story[];
+  correctIndex?: number;
+  originalTopic?: string;
+  mainSubject?: string;
+  isPartialMatch?: boolean;
   newStoryIds?: string[];
+  error?: string;
+  suggestion?: string;
+  message?: string;
 }
 
 export default function GossipGame() {
   const searchParams = useSearchParams();
   const [topic, setTopic] = useState(searchParams.get('topic') || '');
-  const [loading, setLoading] = useState(false);
   const [stories, setStories] = useState<Story[]>([]);
-  const [correctIndex, setCorrectIndex] = useState<number>(-1);
-  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [correctIndex, setCorrectIndex] = useState(-1);
   const [revealed, setRevealed] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(60); // 1 minute in seconds
+  const [timeLeft, setTimeLeft] = useState(30); // 30 seconds
   const [score, setScore] = useState(0);
   const [attempts, setAttempts] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [recentStories, setRecentStories] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -67,14 +78,22 @@ export default function GossipGame() {
 
   const fetchGossip = async (searchTopic: string) => {
     setLoading(true);
+    setError(null);
     try {
       const response = await fetch(
         `/api/reddit?topic=${encodeURIComponent(searchTopic)}&recentStories=${encodeURIComponent(JSON.stringify(recentStories))}`
       );
       const data: GossipResponse = await response.json();
 
-      if (data.error) {
-        throw new Error(data.error || 'Failed to fetch gossip');
+      if (!response.ok) {
+        if (data.suggestion) {
+          setTopic(data.suggestion);
+        }
+        throw new Error(data.error || data.message || 'Failed to fetch gossip');
+      }
+
+      if (!data.stories || !data.correctIndex) {
+        throw new Error('Invalid response from server');
       }
 
       setStories(data.stories);
@@ -94,9 +113,10 @@ export default function GossipGame() {
 
       setSelectedIndex(-1);
       setRevealed(false);
+      setGameStarted(true);
     } catch (error) {
       console.error('Error fetching gossip:', error);
-      alert(error instanceof Error ? error.message : 'Failed to fetch gossip');
+      setError(error instanceof Error ? error.message : 'Failed to fetch gossip');
     } finally {
       setLoading(false);
     }
@@ -106,7 +126,7 @@ export default function GossipGame() {
     setGameStarted(true);
     setScore(0);
     setAttempts(0);
-    setTimeLeft(60); // 1 minute
+    setTimeLeft(30); // 30 seconds
     setGameOver(false);
     if (topic) {
       fetchGossip(topic);
@@ -205,7 +225,7 @@ export default function GossipGame() {
             disabled={!topic}
             className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Start 1-Minute Tea Time! ☕️
+            Start 30-Second Tea Time! ☕️
           </button>
         </div>
       </div>
