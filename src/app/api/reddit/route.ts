@@ -12,11 +12,10 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-async function fetchRedditPosts(topic: string) {
+async function fetchPostComments(permalink: string) {
   try {
-    // First try to get posts from the last day
-    let response = await fetch(
-      `https://www.reddit.com/search.json?q=${encodeURIComponent(topic)}&sort=hot&t=day&limit=10`,
+    const response = await fetch(
+      `https://www.reddit.com${permalink}.json`,
       {
         headers: {
           'User-Agent': 'GossAIP/1.0',
@@ -28,72 +27,223 @@ async function fetchRedditPosts(topic: string) {
       throw new Error(`Reddit API error: ${response.status}`);
     }
 
-    let data = await response.json();
-    let posts = data?.data?.children?.map((child: any) => child.data) || [];
+    const data = await response.json();
+    return data[1]?.data?.children || [];
+  } catch (error) {
+    console.error('Error fetching comments:', error);
+    return [];
+  }
+}
 
-    // If no posts found in the last day, try the last week
-    if (posts.length === 0) {
-      response = await fetch(
-        `https://www.reddit.com/search.json?q=${encodeURIComponent(topic)}&sort=hot&t=week&limit=10`,
-        {
-          headers: {
-            'User-Agent': 'GossAIP/1.0',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Reddit API error: ${response.status}`);
+function calculateEngagementScore(post: any, comments: any[]) {
+  const postScore = post.score || 0;
+  const commentCount = post.num_comments || 0;
+  const controversialityScore = post.controversiality || 0;
+  
+  // Calculate average comment score and depth
+  let totalCommentScore = 0;
+  let maxCommentDepth = 0;
+  let topCommentCount = 0;
+  
+  const processComment = (comment: any, depth: number = 0) => {
+    if (comment?.data?.score) {
+      totalCommentScore += comment.data.score;
+      maxCommentDepth = Math.max(maxCommentDepth, depth);
+      
+      // Count highly upvoted comments
+      if (comment.data.score > 100) {
+        topCommentCount++;
       }
+      
+      // Process replies recursively
+      if (comment.data.replies?.data?.children) {
+        comment.data.replies.data.children.forEach((reply: any) => 
+          processComment(reply, depth + 1)
+        );
+      }
+    }
+  };
+  
+  comments.forEach(comment => processComment(comment));
+  
+  const avgCommentScore = comments.length > 0 ? totalCommentScore / comments.length : 0;
+  
+  // Weighted scoring formula
+  return (
+    postScore * 0.4 +                    // Post score weight
+    commentCount * 0.2 +                 // Comment count weight
+    avgCommentScore * 0.2 +             // Average comment score weight
+    maxCommentDepth * 50 +              // Discussion depth bonus
+    topCommentCount * 100 +             // Popular comments bonus
+    (controversialityScore * 50)         // Controversy bonus
+  );
+}
 
-      data = await response.json();
-      posts = data?.data?.children?.map((child: any) => child.data) || [];
+function extractMainSubject(topic: string): string {
+  // List of known public figures and common topics
+  const knownFigures = [
+    'elon musk', 'taylor swift', 'kanye', 'kardashian', 'trump',
+    'biden', 'beyonce', 'drake', 'zuckerberg', 'gates'
+  ];
+
+  const words = topic.toLowerCase().split(' ');
+  
+  // Check for known figures first
+  for (const figure of knownFigures) {
+    if (topic.toLowerCase().includes(figure)) {
+      return figure;
+    }
+  }
+
+  // If no known figure found, use NLP-like approach to find main subject
+  // Look for proper nouns (words starting with capital letters in original topic)
+  const properNouns = topic.split(' ')
+    .filter(word => word[0] === word[0].toUpperCase())
+    .join(' ');
+  
+  if (properNouns) {
+    return properNouns;
+  }
+
+  // Fallback to first two words if they're substantial
+  return words.slice(0, 2)
+    .filter(word => word.length > 3)
+    .join(' ');
+}
+
+async function fetchRedditPosts(topic: string) {
+  try {
+    // Try exact phrase first
+    let posts = await searchReddit(`"${topic}"`, 'day');
+    let mainSubject = topic;
+
+    // If no relevant posts, try breaking down the query
+    if (!posts || posts.length === 0) {
+      mainSubject = extractMainSubject(topic);
+      console.log(`No results for "${topic}", trying main subject: "${mainSubject}"`);
+      
+      // Try different time ranges with the main subject
+      posts = await searchReddit(mainSubject, 'day') ||
+              await searchReddit(mainSubject, 'week') ||
+              await searchReddit(mainSubject, 'month');
     }
 
-    // Filter out posts that don't seem relevant
-    const relevantPosts = posts.filter((post: any) => {
-      const titleLower = post.title.toLowerCase();
-      const topicLower = topic.toLowerCase();
-      return (
-        titleLower.includes(topicLower) ||
-        (post.selftext && post.selftext.toLowerCase().includes(topicLower))
-      );
-    });
-
-    if (relevantPosts.length === 0) {
-      throw new Error('No relevant posts found');
+    if (!posts || posts.length === 0) {
+      throw new Error(`No posts found for "${topic}" or "${mainSubject}"`);
     }
 
-    return relevantPosts;
+    // Fetch comments and calculate engagement for relevant posts
+    const postsWithEngagement = await Promise.all(
+      posts.map(async (post: any) => {
+        const comments = await fetchPostComments(post.permalink);
+        const engagementScore = calculateEngagementScore(post, comments);
+        
+        // Extract interesting comments
+        const topComments = comments
+          .filter((comment: any) => 
+            comment?.data?.score > 50 && 
+            comment?.data?.body && 
+            comment?.data?.body.length > 20
+          )
+          .map((comment: any) => comment.data.body)
+          .slice(0, 3);
+
+        return {
+          ...post,
+          engagementScore,
+          topComments,
+          mainSubject,
+          isPartialMatch: mainSubject !== topic
+        };
+      })
+    );
+
+    // Sort by engagement score and return top results
+    return postsWithEngagement
+      .sort((a, b) => b.engagementScore - a.engagementScore)
+      .slice(0, 5);
   } catch (error) {
     console.error('Error fetching Reddit posts:', error);
     throw error;
   }
 }
 
-async function generateFakeGossip(realGossip: string, topic: string) {
-  const prompt = `Given this real gossip about "${topic}":
-  "${realGossip}"
-  
-  Generate a fictional but believable gossip story about the same topic. Make it engaging and playful, matching the tone of the real gossip. The story should be different but equally plausible.`;
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
-    messages: [
+async function searchReddit(query: string, timeRange: 'day' | 'week' | 'month'): Promise<any[]> {
+  try {
+    const response = await fetch(
+      `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}\u0026sort=hot\u0026t=${timeRange}\u0026limit=15`,
       {
-        role: "system",
-        content: "You are a creative gossip writer. Generate engaging, playful, and believable gossip stories that match the tone of real gossip but are entirely fictional."
-      },
-      {
-        role: "user",
-        content: prompt
+        headers: {
+          'User-Agent': 'GossAIP/1.0',
+        },
       }
-    ],
-    temperature: 0.8,
-    max_tokens: 200,
-  });
+    );
 
-  return response.choices[0].message.content?.trim() || '';
+    if (!response.ok) {
+      throw new Error(`Reddit API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const posts = data?.data?.children?.map((child: any) => child.data) || [];
+
+    // Filter for relevance
+    return posts.filter((post: any) => {
+      const content = (post.title + ' ' + (post.selftext || '')).toLowerCase();
+      const searchTerms = query.toLowerCase().split(' ');
+      return searchTerms.some(term => content.includes(term));
+    });
+  } catch (error) {
+    console.error(`Error searching Reddit for "${query}":`, error);
+    return [];
+  }
+}
+
+async function generateFakeGossip(realGossip: string, topic: string, topComments: string[] = [], isPartialMatch: boolean = false) {
+  try {
+    const matchContext = isPartialMatch 
+      ? `While we couldn't find exact gossip about "${topic}", here's an interesting story about ${realGossip.split(' ').slice(0, 3).join(' ')}...`
+      : '';
+
+    const commentsContext = topComments.length > 0 
+      ? `Some interesting details from the discussion:\n${topComments.join('\n')}`
+      : '';
+
+    const prompt = `${matchContext}
+    Given this real gossip:
+    "${realGossip}"
+    
+    ${commentsContext}
+    
+    Generate a fictional but believable gossip story about the same topic. Make it engaging and playful, matching the tone of the real gossip. The story should be different but equally plausible. Include some specific details to make it more convincing.`;
+
+    const response = await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content: "You are a creative gossip writer. Generate engaging, playful, and believable gossip stories that match the tone of real gossip but are entirely fictional."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.8,
+        max_tokens: 200,
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('OpenAI request timeout')), 10000)
+      )
+    ]);
+
+    return response.choices[0].message.content?.trim() || 'Failed to generate a story';
+  } catch (error) {
+    console.error('Error generating fake gossip:', error);
+    return `Here's some alternative gossip about ${topic}: ` +
+           `Rumor has it that there's been some interesting developments, ` +
+           `but we're still waiting for more details to emerge...`;
+  }
 }
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -131,120 +281,59 @@ export async function GET(request: Request) {
 
         return NextResponse.json({ error: 'Topic is required', suggestion: trendingTopic }, { status: 400 });
       } catch (error) {
-        console.error('Error fetching trending topic:', error);
         return NextResponse.json({ error: 'Topic is required' }, { status: 400 });
       }
     }
 
     const posts = await fetchRedditPosts(topic);
-    
-    // Select a random post from the top 5 most engaging posts
-    const topPosts = posts
-      .sort((a: any, b: any) => {
-        const scoreA = (a.score || 0) * 1.5 + (a.num_comments || 0);
-        const scoreB = (b.score || 0) * 1.5 + (b.num_comments || 0);
-        return scoreB - scoreA;
-      })
-      .slice(0, 5);
-    
-    const bestPost = topPosts[Math.floor(Math.random() * topPosts.length)];
 
-    if (!bestPost) {
-      return NextResponse.json({ error: 'No suitable posts found' }, { status: 404 });
+    if (!posts || posts.length === 0) {
+      return NextResponse.json(
+        { error: 'No relevant posts found', suggestion: 'Try a different or broader topic' },
+        { status: 404 }
+      );
     }
 
-    // Generate the real gossip summary
-    const realGossipResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: "You are a gossip columnist. Create a short, engaging, and playful summary of news and stories in a gossip style. Keep it concise, around 2-3 sentences. Use common gossip phrases and expressions."
-        },
-        {
-          role: "user",
-          content: `Summarize this Reddit post into a short, playful gossip-style paragraph (2-3 sentences):
-          Title: ${bestPost.title}
-          Content: ${bestPost.selftext?.substring(0, 500) || bestPost.title}`
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 100,
-    });
+    // Select the post with highest engagement score
+    const selectedPost = posts[0];
+    const realGossip = selectedPost.title + (selectedPost.selftext ? ` ${selectedPost.selftext}` : '');
 
-    const realGossip = realGossipResponse.choices[0].message.content?.trim() || '';
+    // Generate fake gossip using both the post and top comments
+    const fakeGossip = await generateFakeGossip(realGossip, topic, selectedPost.topComments, selectedPost.isPartialMatch);
 
-    // Extract key elements from the real gossip
-    const styleAnalysisResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: "Analyze the given gossip and extract key elements like names, places, events, and writing style patterns."
-        },
-        {
-          role: "user",
-          content: `Analyze this gossip and list key elements that make it sound authentic:
-          "${realGossip}"`
-        }
-      ],
-      temperature: 0.5,
-      max_tokens: 100,
-    });
-
-    const styleAnalysis = styleAnalysisResponse.choices[0].message.content?.trim() || '';
-
-    // Generate two fake gossip stories using the style analysis
-    const fakeGossipResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: "Generate two short, fictional but believable gossip stories. Each story should be 2-3 sentences and match the style of the real gossip. Use similar tone, structure, and gossip elements, but with different content. Make them tricky to distinguish from the real one. Do not number the stories or add any prefixes."
-        },
-        {
-          role: "user",
-          content: `Create two different fictional gossip stories about "${topic}" that closely match this style:
-          Real gossip: "${realGossip}"
-          Style elements: "${styleAnalysis}"
-          
-          Make the fake stories sound very similar but with different events/details.`
-        }
-      ],
-      temperature: 0.8,
-      max_tokens: 200,
-    });
-
-    const fakeGossips = fakeGossipResponse.choices[0].message.content?.split('\n\n')
-      .filter(gossip => gossip?.trim()?.length > 0)
-      .map(gossip => gossip.replace(/^\d+\.\s*/, '').trim())
-      .slice(0, 2) || [];
-
-    if (fakeGossips.length < 2) {
-      throw new Error('Failed to generate fake gossip stories');
-    }
-
-    // Create the stories array and shuffle
+    // Randomly decide whether to show the real gossip first or second
+    const isRealFirst = Math.random() < 0.5;
     const stories = [
-      { content: realGossip, isReal: true, redditUrl: `https://reddit.com${bestPost.permalink}` },
-      ...fakeGossips.map(content => ({ content, isReal: false }))
+      {
+        content: isRealFirst ? realGossip : fakeGossip,
+        isReal: isRealFirst,
+        redditUrl: isRealFirst ? `https://reddit.com${selectedPost.permalink}` : undefined,
+        engagementScore: isRealFirst ? selectedPost.engagementScore : undefined,
+        isPartialMatch: selectedPost.isPartialMatch,
+        mainSubject: selectedPost.mainSubject
+      },
+      {
+        content: isRealFirst ? fakeGossip : realGossip,
+        isReal: !isRealFirst,
+        redditUrl: !isRealFirst ? `https://reddit.com${selectedPost.permalink}` : undefined,
+        engagementScore: !isRealFirst ? selectedPost.engagementScore : undefined,
+        isPartialMatch: selectedPost.isPartialMatch,
+        mainSubject: selectedPost.mainSubject
+      }
     ];
 
-    // Shuffle the stories
-    const shuffledStories = [...stories].sort(() => Math.random() - 0.5);
-    const correctIndex = shuffledStories.findIndex(story => story.isReal);
-
     return NextResponse.json({
-      topic,
-      stories: shuffledStories,
-      correctIndex
+      stories,
+      correctIndex: isRealFirst ? 0 : 1,
+      originalTopic: topic,
+      mainSubject: selectedPost.mainSubject,
+      isPartialMatch: selectedPost.isPartialMatch
     });
   } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ 
-      error: error instanceof Error ? error.message : 'Failed to generate gossip'
-    }, { 
-      status: 500 
-    });
+    console.error('API error:', error);
+    return NextResponse.json(
+      { error: 'Failed to process request', message: error.message },
+      { status: 500 }
+    );
   }
 }
