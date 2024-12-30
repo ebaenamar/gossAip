@@ -235,7 +235,7 @@ async function generateFakeGossip(realGossip: string, topic: string, topComments
       new Promise((_, reject) => 
         setTimeout(() => reject(new Error('OpenAI request timeout')), 10000)
       )
-    ]);
+    ]) as OpenAI.Chat.ChatCompletion;
 
     return response.choices[0].message.content?.trim() || 'Failed to generate a story';
   } catch (error) {
