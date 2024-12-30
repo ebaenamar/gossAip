@@ -42,25 +42,33 @@ export async function GET(request: Request) {
     }
 
     // Select the most engaging post
-    const bestPost = posts.reduce((best: any, current: any) => {
-      const bestScore = best.score * 1.5 + best.num_comments;
-      const currentScore = current.score * 1.5 + current.num_comments;
-      return currentScore > bestScore ? current : best;
-    });
+
+      const topPosts = posts
+      .sort((a: any, b: any) => (b.score * 1.5 + b.num_comments) - (a.score * 1.5 + a.num_comments))
+      .slice(0, 10);
+    
+//    const bestPost = posts.reduce((best: any, current: any) => {
+  //    const bestScore = best.score * 1.5 + best.num_comments;
+    //  const currentScore = current.score * 1.5 + current.num_comments;
+   //   return currentScore > bestScore ? current : best;
+   // });
+
+    // Prepare content for GPT
+    const postsContent = topPosts.map((post: any) =>
+      `Title: ${post.title}\nContent: ${post.selftext?.substring(0, 200) || post.title}`
+    ).join('\n\n');
 
     // Generate the real gossip summary
     const realGossipResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are a gossip columnist. Create engaging, playful summaries of news and stories in a gossip style."
+          content: "You are a gossip columnist. Create a short, engaging, and playful summary of news and stories in a gossip style, based on multiple Reddit posts."
         },
         {
           role: "user",
-          content: `Summarize this Reddit post into a playful, gossip-style paragraph:
-          Title: ${bestPost.title}
-          Content: ${bestPost.selftext?.substring(0, 500) || bestPost.title}`
+          content: `Summarize these top Reddit posts into a cohesive, playful, gossip-style short summary (max 2-3 sentences):\n\n${postsContent}`
         }
       ],
       temperature: 0.7,
@@ -71,20 +79,19 @@ export async function GET(request: Request) {
 
     // Generate two fake gossip stories
     const fakeGossipResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "Generate two fictional but believable gossip stories about the given topic. Make them engaging and playful."
+          content: "Generate two short, fictional but believable gossip stories about the given topic. Make them engaging and playful, matching the concise style of the real gossip."
         },
         {
           role: "user",
-          content: `Create two different fictional gossip stories about "${topic}" that are similar in style to this real gossip:
-          "${realGossip}"`
+          content: `Create two different fictional gossip stories (2-3 sentences each) about "${topic}" that are similar in style to this real gossip:\n"${realGossip}"`
         }
       ],
       temperature: 0.8,
-      max_tokens: 300,
+      max_tokens: 200,
     });
 
     const fakeGossips = fakeGossipResponse.choices[0].message.content?.split('\n\n')
