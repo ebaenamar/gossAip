@@ -14,6 +14,11 @@ interface Story {
   storyId: string;
 }
 
+interface StoryItem {
+  id: string;
+  timestamp: number;
+}
+
 interface GossipResponse {
   stories?: Story[];
   correctIndex?: number;
@@ -62,12 +67,12 @@ export default function GossipGame() {
     const stored = localStorage.getItem('recentStories');
     if (stored) {
       try {
-        const parsed = JSON.parse(stored);
+        const parsed = JSON.parse(stored) as StoryItem[];
         const oneHourAgo = Date.now() - 60 * 60 * 1000;
-        const recent = parsed.filter((item: {id: string, timestamp: number}) => 
+        const recent = parsed.filter((item: StoryItem) => 
           item.timestamp > oneHourAgo
         );
-        setRecentStories(recent.map((item: {id: string}) => item.id));
+        setRecentStories(recent.map((item: StoryItem) => item.id));
         localStorage.setItem('recentStories', JSON.stringify(recent));
       } catch (e) {
         console.error('Error parsing recent stories:', e);
@@ -100,14 +105,14 @@ export default function GossipGame() {
       setCorrectIndex(data.correctIndex);
 
       if (data.newStoryIds && data.newStoryIds.length > 0) {
-        const newRecent = [
-          ...recentStories,
+        const newRecent: StoryItem[] = [
+          ...recentStories.map(id => ({ id, timestamp: Date.now() })),
           ...data.newStoryIds.map((id: string) => ({
             id,
             timestamp: Date.now()
           }))
         ];
-        setRecentStories(newRecent.map(item => item.id));
+        setRecentStories(newRecent.map((item: StoryItem) => item.id));
         localStorage.setItem('recentStories', JSON.stringify(newRecent));
       }
 
