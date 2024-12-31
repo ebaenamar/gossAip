@@ -239,53 +239,79 @@ export default function GossipGame() {
 
   return (
     <div className="max-w-2xl mx-auto p-6 bg-white/10 backdrop-blur-lg rounded-lg shadow-xl">
-      <div className="mb-6 flex justify-between items-center text-white">
-        <div>Score: {score}</div>
-        <div>{getTimeMessage(timeLeft)} ({formatTime(timeLeft)})</div>
+      <div className="mb-6 space-y-4">
+        <div className="flex justify-between items-center text-white">
+          <div className="text-xl font-semibold">Score: {score}</div>
+          <div className="text-lg">{getTimeMessage(timeLeft)} ({formatTime(timeLeft)})</div>
+        </div>
+        <h2 className="text-2xl font-bold text-center text-white bg-gradient-to-r from-purple-400 to-pink-400 text-transparent bg-clip-text">
+          Which gossip about {topic} is real? 🤔
+        </h2>
       </div>
       
       {loading ? (
-        <div className="text-center py-8 text-white">Loading gossip...</div>
+        <div className="text-center py-12">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500"></div>
+          <p className="text-white mt-4">Gathering the latest tea...</p>
+        </div>
       ) : (
         <div className="space-y-6">
-          <h2 className="text-xl font-semibold mb-4 text-white">Topic: {topic}</h2>
-          
-          <div className="space-y-4">
-            {stories.map((story, index) => (
-              <div
+          <div className="grid gap-6">
+            {stories.slice(0, 2).map((story, index) => (
+              <button
                 key={index}
                 onClick={() => handleGuess(index)}
-                className={`p-4 rounded-lg cursor-pointer transition-colors ${
+                disabled={revealed}
+                className={`p-6 rounded-lg text-left transition-all transform hover:scale-[1.02] ${
                   revealed
                     ? index === correctIndex
-                      ? 'bg-green-500/20'
-                      : 'bg-red-500/20'
+                      ? 'bg-green-500/30 border-2 border-green-400/50'
+                      : 'bg-red-500/30 border-2 border-red-400/50'
                     : selectedIndex === index
-                    ? 'bg-purple-500/20'
-                    : 'bg-white/20 hover:bg-white/30'
-                }`}
+                    ? 'bg-purple-500/30 border-2 border-purple-400/50'
+                    : 'bg-white/20 hover:bg-white/30 border-2 border-white/30'
+                } ${!revealed && 'hover:shadow-lg cursor-pointer'}`}
               >
-                <p className="text-white">{story.content}</p>
-                {revealed && index === correctIndex && story.redditUrl && (
-                  <a
-                    href={story.redditUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-300 hover:text-blue-400 text-sm mt-2 block"
-                  >
-                    View on Reddit →
-                  </a>
-                )}
-              </div>
+                <div className="space-y-4">
+                  <p className="text-lg text-white leading-relaxed">{story.content}</p>
+                  {revealed && (
+                    <div className="pt-4 border-t border-white/20">
+                      {index === correctIndex ? (
+                        <div className="flex items-center text-green-300">
+                          <span className="mr-2">✓</span>
+                          <span>This was the real gossip!</span>
+                          {story.redditUrl && (
+                            <a
+                              href={story.redditUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-auto text-blue-300 hover:text-blue-400 flex items-center"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              View on Reddit 
+                              <span className="ml-1">→</span>
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center text-red-300">
+                          <span className="mr-2">×</span>
+                          <span>This was AI-generated fake gossip!</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </button>
             ))}
           </div>
           
           {revealed && (
             <button
               onClick={handleNextGossip}
-              className="w-full mt-4 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              className="w-full mt-6 px-6 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all transform hover:scale-105 font-medium text-lg shadow-lg"
             >
-              Next Gossip!
+              Next Gossip! 🫖
             </button>
           )}
         </div>

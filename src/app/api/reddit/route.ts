@@ -289,74 +289,52 @@ function shuffleArray<T>(array: T[]): T[] {
 
 async function generateStories(posts: any[], topic: string, recentStoryIds: string[] = []) {
   try {
-    // Filter out recently shown posts if recentStoryIds provided
+    // Filter out recently shown posts
     const freshPosts = recentStoryIds.length > 0 
       ? posts.filter(post => !recentStoryIds.includes(`${post.subreddit}_${post.id}`))
       : posts;
     
-    // If we don't have enough fresh posts, use all posts
-    const postsToUse = freshPosts.length >= 3 ? freshPosts : posts;
+    // Use fresh posts if available, otherwise fall back to all posts
+    const postsToUse = freshPosts.length > 0 ? freshPosts : posts;
     
-    // Get top posts by engagement
-    const topPosts = postsToUse.slice(0, Math.min(5, postsToUse.length));
+    // Get the highest engagement post
+    const bestPost = postsToUse[0];
     
-    // Format each Reddit post into a gossip story
-    const formattedStories = await Promise.all(
-      topPosts.map(post => formatRedditGossip(post, post.topComments))
-    );
+    // Format the Reddit post into a gossip story
+    const realStory = await formatRedditGossip(bestPost, bestPost.topComments);
 
-    // Generate fake versions for each story
-    const fakeStories = await Promise.all(
-      formattedStories.map(story => 
-        generateFakeGossip(story, topic, [], postsToUse[0].isPartialMatch)
-      )
-    );
+    // Generate a fake version
+    const fakeStory = await generateFakeGossip(realStory, topic, bestPost.topComments || [], bestPost.isPartialMatch);
 
-    // Create array of all possible stories with their metadata
-    const allStories = [
-      ...topPosts.map((post, index) => ({
-        content: formattedStories[index],
+    // Create story objects
+    const stories = [
+      {
+        content: realStory,
         isReal: true,
-        redditUrl: `https://reddit.com${post.permalink}`,
-        engagementScore: post.engagementScore,
-        isPartialMatch: post.isPartialMatch,
-        mainSubject: post.mainSubject,
-        subreddit: post.subreddit,
-        storyId: `${post.subreddit}_${post.id}`
-      })),
-      ...fakeStories.map((story, index) => ({
-        content: story,
+        redditUrl: `https://reddit.com${bestPost.permalink}`,
+        engagementScore: bestPost.engagementScore,
+        isPartialMatch: bestPost.isPartialMatch,
+        mainSubject: bestPost.mainSubject,
+        subreddit: bestPost.subreddit,
+        storyId: `${bestPost.subreddit}_${bestPost.id}`
+      },
+      {
+        content: fakeStory,
         isReal: false,
         engagementScore: undefined,
-        isPartialMatch: postsToUse[0].isPartialMatch,
-        mainSubject: postsToUse[0].mainSubject,
-        storyId: `fake_${topic}_${index}_${Date.now()}`
-      }))
+        isPartialMatch: bestPost.isPartialMatch,
+        mainSubject: bestPost.mainSubject,
+        storyId: `fake_${topic}_${Date.now()}`
+      }
     ];
 
-    // Shuffle all stories
-    const shuffledStories = shuffleArray(allStories);
-
-    // Select 3 stories, ensuring at least one is real
-    let selectedStories = shuffledStories.slice(0, 3);
-    const hasRealStory = selectedStories.some(story => story.isReal);
-    
-    if (!hasRealStory) {
-      // Replace a random fake story with the highest-engagement real story
-      const randomIndex = Math.floor(Math.random() * 3);
-      const realStory = shuffledStories.find(story => story.isReal)!;
-      selectedStories[randomIndex] = realStory;
-    }
-
-    // Return new story IDs to be cached on client side
-    const newStoryIds = selectedStories
-      .filter(story => story.isReal)
-      .map(story => story.storyId);
+    // Randomly shuffle the order
+    const shuffledStories = shuffleArray(stories);
 
     return {
-      stories: selectedStories,
-      correctIndex: selectedStories.findIndex(story => story.isReal),
-      newStoryIds
+      stories: shuffledStories,
+      correctIndex: shuffledStories.findIndex(story => story.isReal),
+      newStoryIds: [stories[0].storyId] // Only track the real story ID
     };
   } catch (error) {
     console.error('Error generating stories:', error);
