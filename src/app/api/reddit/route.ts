@@ -169,28 +169,74 @@ async function fetchRedditPosts(topic: string) {
 }
 
 async function searchReddit(query: string, timeRange: 'day' | 'week' | 'month'): Promise<any[]> {
+  const gossipSubreddits = [
+    'entertainment', 'Deuxmoi', 'popculturechat', 'celebritygossip', 
+    'popheads', 'BravoRealHousewives', 'KUWTK', 'blogsnark', 'HollywoodGossip'
+  ];
+  
   try {
-    const response = await fetch(
-      `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}\u0026sort=hot\u0026t=${timeRange}\u0026limit=15`,
-      {
-        headers: {
-          'User-Agent': 'GossAIP/1.0',
-        },
-      }
-    );
+    // First try searching in specific gossip subreddits
+    let allPosts: any[] = [];
+    
+    for (const subreddit of gossipSubreddits) {
+      const response = await fetch(
+        `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(query)}&restrict_sr=on&sort=hot&t=${timeRange}&limit=10`,
+        {
+          headers: {
+            'User-Agent': 'GossAIP/1.0',
+          },
+        }
+      );
 
-    if (!response.ok) {
-      throw new Error(`Reddit API error: ${response.status}`);
+      if (response.ok) {
+        const data = await response.json();
+        const posts = data?.data?.children?.map((child: any) => child.data) || [];
+        allPosts.push(...posts);
+      }
     }
 
-    const data = await response.json();
-    const posts = data?.data?.children?.map((child: any) => child.data) || [];
+    // If not enough posts found in specific subreddits, try general search
+    if (allPosts.length < 5) {
+      const response = await fetch(
+        `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=hot&t=${timeRange}&limit=25`,
+        {
+          headers: {
+            'User-Agent': 'GossAIP/1.0',
+          },
+        }
+      );
 
-    // Filter for relevance
-    return posts.filter((post: any) => {
+      if (response.ok) {
+        const data = await response.json();
+        const posts = data?.data?.children?.map((child: any) => child.data) || [];
+        allPosts.push(...posts);
+      }
+    }
+
+    // Filter for relevance and ensure posts contain actual gossip
+    return allPosts.filter((post: any) => {
       const content = (post.title + ' ' + (post.selftext || '')).toLowerCase();
       const searchTerms = query.toLowerCase().split(' ');
-      return searchTerms.some(term => content.includes(term));
+      
+      // Check if content contains the search terms
+      const hasSearchTerms = searchTerms.some(term => content.includes(term));
+      
+      // Check if the content likely contains gossip
+      const gossipIndicators = [
+        'rumor', 'allegedly', 'sources say', 'insider', 'exclusive',
+        'spotted', 'claims', 'reveals', 'drama', 'scandal', 'tea',
+        'dating', 'breakup', 'split', 'cheating', 'divorce',
+        'announcement', 'confirmed', 'denied', 'source close to'
+      ];
+      
+      const hasGossipIndicators = gossipIndicators.some(indicator => 
+        content.includes(indicator)
+      );
+      
+      // Check post length to ensure it's substantial
+      const hasSubstantialContent = post.selftext?.length > 100 || post.num_comments > 10;
+      
+      return hasSearchTerms && (hasGossipIndicators || hasSubstantialContent);
     });
   } catch (error) {
     console.error(`Error searching Reddit for "${query}":`, error);
@@ -198,35 +244,133 @@ async function searchReddit(query: string, timeRange: 'day' | 'week' | 'month'):
   }
 }
 
-async function formatRedditGossip(post: any, comments: string[]): Promise<string> {
+async function formatRedditGossip(post: any, comments: any[] = []): Promise<string> {
+  // Extract the most relevant part of the post
+  const content = post.selftext || post.title;
+  const sentences = content.split(/[.!?]+/).filter(Boolean);
+  
+  // Try to find the most gossip-worthy sentences
+  const gossipIndicators = [
+    'rumor', 'allegedly', 'sources say', 'insider', 'exclusive',
+    'spotted', 'claims', 'reveals', 'drama', 'scandal', 'tea'
+  ];
+  
+  const relevantSentences = sentences.filter(sentence => 
+    gossipIndicators.some(indicator => 
+      sentence.toLowerCase().includes(indicator)
+    )
+  );
+  
+  // If no gossip-specific sentences found, use the first few sentences
+  const gossipContent = relevantSentences.length > 0 
+    ? relevantSentences.slice(0, 2).join('. ')
+    : sentences.slice(0, 2).join('. ');
+    
+  // Add context from top comments if available
+  const topComment = comments
+    .filter(comment => comment?.data?.score > 50)
+    .map(comment => comment.data.body)
+    .slice(0, 1)
+    .join(' ');
+    
+  return `${gossipContent}${topComment ? ` ${topComment}` : ''}`;
+}
+
+async function generateStories(posts: any[], topic: string, recentStoryIds: string[] = []) {
   try {
-    const context = `
-    Title: ${post.title}
-    Content: ${post.selftext || ''}
-    ${comments.length > 0 ? `\nTop comments:\n${comments.join('\n')}` : ''}
-    `;
+    // Filter out recently shown posts
+    const freshPosts = recentStoryIds.length > 0 
+      ? posts.filter(post => !recentStoryIds.includes(`${post.subreddit}_${post.id}`))
+      : posts;
+    
+    // Use fresh posts if available, otherwise fall back to all posts
+    const postsToUse = freshPosts.length > 0 ? freshPosts : posts;
+    
+    if (postsToUse.length === 0) {
+      return {
+        error: `No fresh gossip found about "${topic}". Try searching for a different celebrity or check back later for new tea! ☕️`,
+        suggestion: await getTrendingTopic()
+      };
+    }
+    
+    // Get the highest engagement post
+    const bestPost = postsToUse[0];
+    
+    // Format the Reddit post into a gossip story
+    const realStory = await formatRedditGossip(bestPost, bestPost.topComments);
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: "You are a gossip columnist who creates engaging, juicy gossip stories from Reddit posts. Keep the core facts the same but make it more entertaining and gossip-like."
-        },
-        {
-          role: "user",
-          content: `Transform this Reddit content into a juicy gossip story. Keep it factual but make it more engaging and gossip-like:\n${context}`
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 200,
-    });
+    // Generate a fake version
+    const fakeStory = await generateFakeGossip(realStory, topic, bestPost.topComments || [], bestPost.isPartialMatch);
 
-    return response.choices[0].message.content?.trim() || post.title;
+    // Create story objects
+    const stories = [
+      {
+        content: realStory,
+        isReal: true,
+        redditUrl: `https://reddit.com${bestPost.permalink}`,
+        engagementScore: bestPost.engagementScore,
+        isPartialMatch: bestPost.isPartialMatch,
+        mainSubject: bestPost.mainSubject,
+        subreddit: bestPost.subreddit,
+        storyId: `${bestPost.subreddit}_${bestPost.id}`
+      },
+      {
+        content: fakeStory,
+        isReal: false,
+        engagementScore: undefined,
+        isPartialMatch: bestPost.isPartialMatch,
+        mainSubject: bestPost.mainSubject,
+        storyId: `fake_${topic}_${Date.now()}`
+      }
+    ];
+
+    // Randomly shuffle the order
+    const shuffledStories = shuffleArray(stories);
+
+    return {
+      stories: shuffledStories,
+      correctIndex: shuffledStories.findIndex(story => story.isReal),
+      newStoryIds: [stories[0].storyId]
+    };
   } catch (error) {
-    console.error('Error formatting Reddit gossip:', error);
-    // Fallback to a simple format if OpenAI fails
-    return `${post.title}${post.selftext ? ` - ${post.selftext.slice(0, 200)}...` : ''}`;
+    console.error('Error generating stories:', error);
+    throw error;
+  }
+}
+
+async function getTrendingTopic(): Promise<string> {
+  try {
+    const response = await fetch(
+      'https://www.reddit.com/r/Deuxmoi/hot.json?limit=5',
+      {
+        headers: {
+          'User-Agent': 'GossAIP/1.0',
+        },
+      }
+    );
+    
+    if (!response.ok) throw new Error('Failed to fetch trending topics');
+    
+    const data = await response.json();
+    const posts = data?.data?.children || [];
+    
+    // Find a post title that mentions a celebrity
+    const celebrityPost = posts.find((post: any) => {
+      const title = post.data.title.toLowerCase();
+      return !title.includes('daily discussion') && !title.includes('megathread');
+    });
+    
+    if (celebrityPost) {
+      // Extract the main subject from the title
+      const title = celebrityPost.data.title;
+      const words = title.split(' ').slice(0, 3).join(' ');
+      return words;
+    }
+    
+    return 'Taylor Swift'; // Default fallback
+  } catch (error) {
+    console.error('Error fetching trending topic:', error);
+    return 'Taylor Swift'; // Default fallback
   }
 }
 
@@ -285,61 +429,6 @@ function shuffleArray<T>(array: T[]): T[] {
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
-}
-
-async function generateStories(posts: any[], topic: string, recentStoryIds: string[] = []) {
-  try {
-    // Filter out recently shown posts
-    const freshPosts = recentStoryIds.length > 0 
-      ? posts.filter(post => !recentStoryIds.includes(`${post.subreddit}_${post.id}`))
-      : posts;
-    
-    // Use fresh posts if available, otherwise fall back to all posts
-    const postsToUse = freshPosts.length > 0 ? freshPosts : posts;
-    
-    // Get the highest engagement post
-    const bestPost = postsToUse[0];
-    
-    // Format the Reddit post into a gossip story
-    const realStory = await formatRedditGossip(bestPost, bestPost.topComments);
-
-    // Generate a fake version
-    const fakeStory = await generateFakeGossip(realStory, topic, bestPost.topComments || [], bestPost.isPartialMatch);
-
-    // Create story objects
-    const stories = [
-      {
-        content: realStory,
-        isReal: true,
-        redditUrl: `https://reddit.com${bestPost.permalink}`,
-        engagementScore: bestPost.engagementScore,
-        isPartialMatch: bestPost.isPartialMatch,
-        mainSubject: bestPost.mainSubject,
-        subreddit: bestPost.subreddit,
-        storyId: `${bestPost.subreddit}_${bestPost.id}`
-      },
-      {
-        content: fakeStory,
-        isReal: false,
-        engagementScore: undefined,
-        isPartialMatch: bestPost.isPartialMatch,
-        mainSubject: bestPost.mainSubject,
-        storyId: `fake_${topic}_${Date.now()}`
-      }
-    ];
-
-    // Randomly shuffle the order
-    const shuffledStories = shuffleArray(stories);
-
-    return {
-      stories: shuffledStories,
-      correctIndex: shuffledStories.findIndex(story => story.isReal),
-      newStoryIds: [stories[0].storyId] // Only track the real story ID
-    };
-  } catch (error) {
-    console.error('Error generating stories:', error);
-    throw error;
-  }
 }
 
 export async function GET(request: Request) {
