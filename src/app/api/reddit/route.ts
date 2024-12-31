@@ -35,51 +35,45 @@ async function fetchPostComments(permalink: string) {
   }
 }
 
-function calculateEngagementScore(post: any, comments: any[]) {
-  const postScore = post.score || 0;
+async function calculateEngagementScore(post: any, comments: any[] = []): Promise<number> {
+  // Base score from post metrics
+  let score = post.score || 0;
   const commentCount = post.num_comments || 0;
-  const controversialityScore = post.controversiality || 0;
   
-  // Calculate average comment score and depth
-  let totalCommentScore = 0;
-  let maxCommentDepth = 0;
-  let topCommentCount = 0;
-  
-  const processComment = (comment: any, depth: number = 0) => {
-    if (comment?.data?.score) {
-      totalCommentScore += comment.data.score;
-      maxCommentDepth = Math.max(maxCommentDepth, depth);
-      
-      // Count highly upvoted comments
-      if (comment.data.score > 100) {
-        topCommentCount++;
-      }
-      
-      // Process replies recursively
-      if (comment.data.replies?.data?.children) {
-        comment.data.replies.data.children.forEach((reply: any) => 
-          processComment(reply, depth + 1)
-        );
-      }
-    }
+  // Weighted scoring components
+  const components = {
+    upvoteScore: score * 1.0,
+    commentCount: commentCount * 2.0,
+    controversyBonus: post.upvote_ratio ? (post.upvote_ratio - 0.5) * 100 : 0,
+    awards: (post.total_awards_received || 0) * 10,
+    freshness: Math.max(0, 100 - hoursOld(post.created_utc)) * 2,
   };
+
+  // Add comment quality metrics
+  const commentScores = comments
+    .filter(comment => comment?.data?.score > 20)
+    .map(comment => ({
+      score: comment.data.score,
+      length: (comment.data.body || '').length,
+      awards: comment.data.total_awards_received || 0
+    }));
+
+  const avgCommentScore = commentScores.reduce((sum, c) => sum + c.score, 0) / (commentScores.length || 1);
+  const avgCommentLength = commentScores.reduce((sum, c) => sum + c.length, 0) / (commentScores.length || 1);
   
-  comments.forEach(comment => processComment(comment));
+  components.commentQuality = avgCommentScore * 0.5 + avgCommentLength * 0.01;
+
+  // Calculate final score
+  const totalScore = Object.values(components).reduce((sum, score) => sum + score, 0);
   
-  const avgCommentScore = comments.length > 0 ? totalCommentScore / comments.length : 0;
-  
-  // Weighted scoring formula
-  return (
-    postScore * 0.4 +                    // Post score weight
-    commentCount * 0.2 +                 // Comment count weight
-    avgCommentScore * 0.2 +             // Average comment score weight
-    maxCommentDepth * 50 +              // Discussion depth bonus
-    topCommentCount * 100 +             // Popular comments bonus
-    (controversialityScore * 50)         // Controversy bonus
-  );
+  return totalScore;
 }
 
-function extractMainSubject(topic: string): string {
+function hoursOld(timestamp: number): number {
+  return (Date.now() / 1000 - timestamp) / 3600;
+}
+
+async function extractMainSubject(topic: string): Promise<string> {
   // List of known public figures and common topics
   const knownFigures = [
     'elon musk', 'taylor swift', 'kanye', 'kardashian', 'trump',
@@ -119,7 +113,7 @@ async function fetchRedditPosts(topic: string) {
 
     // If no relevant posts, try breaking down the query
     if (!posts || posts.length === 0) {
-      mainSubject = extractMainSubject(topic);
+      mainSubject = await extractMainSubject(topic);
       console.log(`No results for "${topic}", trying main subject: "${mainSubject}"`);
       
       // Try different time ranges with the main subject
@@ -136,7 +130,7 @@ async function fetchRedditPosts(topic: string) {
     const postsWithEngagement = await Promise.all(
       posts.map(async (post: any) => {
         const comments = await fetchPostComments(post.permalink);
-        const engagementScore = calculateEngagementScore(post, comments);
+        const engagementScore = await calculateEngagementScore(post, comments);
         
         // Extract interesting comments
         const topComments = comments
@@ -245,35 +239,119 @@ async function searchReddit(query: string, timeRange: 'day' | 'week' | 'month'):
 }
 
 async function formatRedditGossip(post: any, comments: any[] = []): Promise<string> {
-  // Extract the most relevant part of the post
-  const content = post.selftext || post.title;
-  const sentences = content.split(/[.!?]+/).filter(Boolean);
-  
-  // Try to find the most gossip-worthy sentences
-  const gossipIndicators = [
-    'rumor', 'allegedly', 'sources say', 'insider', 'exclusive',
-    'spotted', 'claims', 'reveals', 'drama', 'scandal', 'tea'
-  ];
-  
-  const relevantSentences = sentences.filter(sentence => 
-    gossipIndicators.some(indicator => 
-      sentence.toLowerCase().includes(indicator)
-    )
-  );
-  
-  // If no gossip-specific sentences found, use the first few sentences
-  const gossipContent = relevantSentences.length > 0 
-    ? relevantSentences.slice(0, 2).join('. ')
-    : sentences.slice(0, 2).join('. ');
-    
-  // Add context from top comments if available
-  const topComment = comments
+  // Extract content from post and comments
+  const postContent = post.selftext || post.title;
+  const relevantComments = comments
     .filter(comment => comment?.data?.score > 50)
     .map(comment => comment.data.body)
-    .slice(0, 1)
-    .join(' ');
+    .slice(0, 3);
+
+  // Split content into sentences and filter out noise
+  const sentences = postContent.split(/[.!?]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 20 && !s.toLowerCase().includes('submission') && !s.toLowerCase().includes('posted'));
+
+  // Try to find gossip-worthy sentences
+  const gossipIndicators = [
+    'rumor', 'allegedly', 'sources say', 'insider', 'exclusive',
+    'spotted', 'claims', 'reveals', 'drama', 'scandal', 'tea',
+    'dating', 'breakup', 'split', 'cheating', 'divorce',
+    'announcement', 'confirmed', 'denied', 'source close to'
+  ];
+
+  // Score sentences based on gossip indicators and length
+  const scoredSentences = sentences.map(sentence => {
+    const indicators = gossipIndicators.filter(indicator => 
+      sentence.toLowerCase().includes(indicator)
+    );
+    return {
+      sentence,
+      score: indicators.length * 2 + (sentence.length > 100 ? 1 : 0)
+    };
+  });
+
+  // Sort by score and take the best ones
+  const bestSentences = scoredSentences
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(s => s.sentence);
+
+  // If we don't have enough good sentences, add some from comments
+  if (bestSentences.length < 2 && relevantComments.length > 0) {
+    const commentSentences = relevantComments
+      .join(' ')
+      .split(/[.!?]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 20)
+      .slice(0, 2);
     
-  return `${gossipContent}${topComment ? ` ${topComment}` : ''}`;
+    bestSentences.push(...commentSentences);
+  }
+
+  // Ensure we have at least 2-3 sentences worth of content
+  const finalContent = bestSentences.length >= 2 
+    ? bestSentences.join('. ') 
+    : `${post.title}. ${sentences[0] || ''}`;
+
+  return finalContent.trim() + '.';
+}
+
+async function generateFakeGossip(realGossip: string, topic: string, topComments: string[] = [], isPartialMatch: boolean = false) {
+  try {
+    const matchContext = isPartialMatch 
+      ? `While we couldn't find exact gossip about "${topic}", here's an interesting story about ${realGossip.split(' ').slice(0, 3).join(' ')}...`
+      : '';
+
+    const commentsContext = topComments.length > 0 
+      ? `Some interesting details from the discussion:\n${topComments.join('\n')}`
+      : '';
+
+    // Count sentences and approximate length of real gossip
+    const realSentences = realGossip.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const targetLength = realGossip.length;
+
+    const prompt = `${matchContext}
+    Given this real gossip:
+    "${realGossip}"
+    
+    ${commentsContext}
+    
+    Generate a fictional but believable gossip story about the same topic. Important requirements:
+    1. Make it approximately the same length (${targetLength} characters)
+    2. Use about ${realSentences.length} sentences
+    3. Match the level of detail and style of the real gossip
+    4. Make it engaging and playful, but equally plausible
+    5. Include specific details to make it convincing
+    6. Keep the same tone and format as the real gossip`;
+
+    const response = await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content: "You are a creative gossip writer. Generate engaging, playful, and believable gossip stories that match the tone and format of real gossip but are entirely fictional."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.8,
+        max_tokens: 300,
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('OpenAI request timeout')), 10000)
+      )
+    ]) as OpenAI.Chat.ChatCompletion;
+
+    return response.choices[0].message.content?.trim() || 'Failed to generate a story';
+  } catch (error) {
+    console.error('Error generating fake gossip:', error);
+    return `Here's some alternative gossip about ${topic}: ` +
+           `Rumor has it that there's been some interesting developments, ` +
+           `but we're still waiting for more details to emerge...`;
+  }
 }
 
 async function generateStories(posts: any[], topic: string, recentStoryIds: string[] = []) {
@@ -283,23 +361,30 @@ async function generateStories(posts: any[], topic: string, recentStoryIds: stri
       ? posts.filter(post => !recentStoryIds.includes(`${post.subreddit}_${post.id}`))
       : posts;
     
-    // Use fresh posts if available, otherwise fall back to all posts
-    const postsToUse = freshPosts.length > 0 ? freshPosts : posts;
-    
-    if (postsToUse.length === 0) {
+    // Calculate engagement scores for all posts
+    const scoredPosts = await Promise.all(
+      freshPosts.map(async post => ({
+        post,
+        score: await calculateEngagementScore(post, post.topComments || [])
+      }))
+    );
+
+    // Sort by engagement score and get the best post
+    const bestPost = scoredPosts
+      .sort((a, b) => b.score - a.score)
+      [0]?.post;
+
+    if (!bestPost) {
       return {
         error: `No fresh gossip found about "${topic}". Try searching for a different celebrity or check back later for new tea! ☕️`,
         suggestion: await getTrendingTopic()
       };
     }
     
-    // Get the highest engagement post
-    const bestPost = postsToUse[0];
-    
     // Format the Reddit post into a gossip story
     const realStory = await formatRedditGossip(bestPost, bestPost.topComments);
 
-    // Generate a fake version
+    // Generate a fake version with matching length and style
     const fakeStory = await generateFakeGossip(realStory, topic, bestPost.topComments || [], bestPost.isPartialMatch);
 
     // Create story objects
@@ -371,54 +456,6 @@ async function getTrendingTopic(): Promise<string> {
   } catch (error) {
     console.error('Error fetching trending topic:', error);
     return 'Taylor Swift'; // Default fallback
-  }
-}
-
-async function generateFakeGossip(realGossip: string, topic: string, topComments: string[] = [], isPartialMatch: boolean = false) {
-  try {
-    const matchContext = isPartialMatch 
-      ? `While we couldn't find exact gossip about "${topic}", here's an interesting story about ${realGossip.split(' ').slice(0, 3).join(' ')}...`
-      : '';
-
-    const commentsContext = topComments.length > 0 
-      ? `Some interesting details from the discussion:\n${topComments.join('\n')}`
-      : '';
-
-    const prompt = `${matchContext}
-    Given this real gossip:
-    "${realGossip}"
-    
-    ${commentsContext}
-    
-    Generate a fictional but believable gossip story about the same topic. Make it engaging and playful, matching the tone of the real gossip. The story should be different but equally plausible. Include some specific details to make it more convincing.`;
-
-    const response = await Promise.race([
-      openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content: "You are a creative gossip writer. Generate engaging, playful, and believable gossip stories that match the tone of real gossip but are entirely fictional."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        temperature: 0.8,
-        max_tokens: 200,
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('OpenAI request timeout')), 10000)
-      )
-    ]) as OpenAI.Chat.ChatCompletion;
-
-    return response.choices[0].message.content?.trim() || 'Failed to generate a story';
-  } catch (error) {
-    console.error('Error generating fake gossip:', error);
-    return `Here's some alternative gossip about ${topic}: ` +
-           `Rumor has it that there's been some interesting developments, ` +
-           `but we're still waiting for more details to emerge...`;
   }
 }
 
