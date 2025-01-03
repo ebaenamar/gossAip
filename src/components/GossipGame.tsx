@@ -182,6 +182,7 @@ export default function GossipGame() {
             Start 1-Minute Tea Time! ☕️
           </button>
           <div className="text-center pt-6 space-y-3">
+            <p className="text-white/90 text-lg font-medium mb-2">Instructions:</p>
             <div className="inline-flex items-center gap-2 text-white/90 text-lg font-medium bg-white/5 px-4 py-2 rounded-full backdrop-blur-sm">
               <span className="text-xl">👥</span>
               <span>Enter any celebrity or trending topic</span>
