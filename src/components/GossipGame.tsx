@@ -193,7 +193,7 @@ export default function GossipGame() {
               </div>
               <div className="inline-flex items-center gap-2 text-white/80 bg-white/5 px-4 py-2 rounded-full backdrop-blur-sm">
                 <span className="text-xl">⏱️</span>
-                <span>60 seconds to spot the real tea!</span>
+                <span>Spot as many gossips as you can in 60 seconds!</span>
               </div>
             </div>
           </div>
