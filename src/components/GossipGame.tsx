@@ -181,10 +181,21 @@ export default function GossipGame() {
           >
             Start 1-Minute Tea Time! ☕️
           </button>
-          <div className="text-center pt-4 space-y-2">
-            <p className="text-white/80 text-lg">Enter any celebrity or trending topic</p>
-            <p className="text-white/60">You'll get two stories - one real, one AI-made.<br/>Can you tell which is which? 🔍</p>
-            <p className="text-white/60">You have 60 seconds to guess correctly. Good luck!</p>
+          <div className="text-center pt-6 space-y-3">
+            <div className="inline-flex items-center gap-2 text-white/90 text-lg font-medium bg-white/5 px-4 py-2 rounded-full backdrop-blur-sm">
+              <span className="text-xl">👥</span>
+              <span>Enter any celebrity or trending topic</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <div className="inline-flex items-center gap-2 text-white/80 bg-white/5 px-4 py-2 rounded-full backdrop-blur-sm">
+                <span className="text-xl">🎭</span>
+                <span>One real story, one AI-made story</span>
+              </div>
+              <div className="inline-flex items-center gap-2 text-white/80 bg-white/5 px-4 py-2 rounded-full backdrop-blur-sm">
+                <span className="text-xl">⏱️</span>
+                <span>60 seconds to spot the real tea!</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
