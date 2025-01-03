@@ -78,7 +78,7 @@ async function generateFakeGossip(realGossip: string, topic: string) {
   Generate a fictional but believable gossip story about the same topic. Make it engaging and playful, matching the tone of the real gossip. The story should be different but equally plausible.`;
 
   const response = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
+    model: "gpt-4o",
     messages: [
       {
         role: "system",
@@ -155,7 +155,7 @@ export async function GET(request: Request) {
 
     // Generate the real gossip summary
     const realGossipResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -176,7 +176,7 @@ export async function GET(request: Request) {
 
     // Extract key elements from the real gossip
     const styleAnalysisResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -196,7 +196,7 @@ export async function GET(request: Request) {
 
     // Generate two fake gossip stories using the style analysis
     const fakeGossipResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
