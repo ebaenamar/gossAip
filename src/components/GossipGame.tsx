@@ -73,9 +73,8 @@ export default function GossipGame() {
     setGameStarted(true);
     setScore(0);
     setAttempts(0);
-    setTimeLeft(60); // 1 minute
+    setTimeLeft(60);
     setGameOver(false);
-    setStories([]); // Reset stories when starting game
     if (topic) {
       fetchGossip(topic);
     }
@@ -182,6 +181,11 @@ export default function GossipGame() {
           >
             Start 1-Minute Tea Time! ☕️
           </button>
+          <div className="text-center pt-4 space-y-2">
+            <p className="text-white/80 text-lg">Enter any celebrity or trending topic</p>
+            <p className="text-white/60">You'll get two stories - one real, one AI-made.<br/>Can you tell which is which? 🔍</p>
+            <p className="text-white/60">You have 60 seconds to guess correctly. Good luck!</p>
+          </div>
         </div>
       </div>
     );
