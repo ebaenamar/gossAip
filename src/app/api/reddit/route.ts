@@ -50,14 +50,19 @@ async function fetchRedditPosts(topic: string) {
       posts = data?.data?.children?.map((child: any) => child.data) || [];
     }
 
-    // Filter out posts that don't seem relevant
+    // Filter out posts that don't seem relevant or are duplicates
+    const seenUrls = new Set();
     const relevantPosts = posts.filter((post: any) => {
       const titleLower = post.title.toLowerCase();
       const topicLower = topic.toLowerCase();
-      return (
-        titleLower.includes(topicLower) ||
-        (post.selftext && post.selftext.toLowerCase().includes(topicLower))
-      );
+      const isRelevant = titleLower.includes(topicLower) ||
+        (post.selftext && post.selftext.toLowerCase().includes(topicLower));
+      
+      if (!isRelevant || seenUrls.has(post.permalink)) {
+        return false;
+      }
+      seenUrls.add(post.permalink);
+      return true;
     });
 
     if (relevantPosts.length === 0) {
@@ -194,40 +199,37 @@ export async function GET(request: Request) {
 
     const styleAnalysis = styleAnalysisResponse.choices[0].message.content?.trim() || '';
 
-    // Generate two fake gossip stories using the style analysis
+    // Generate one fake gossip story using the style analysis
     const fakeGossipResponse = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "Generate two short, fictional but believable gossip stories. Each story should be 2-3 sentences and match the style of the real gossip. Use similar tone, structure, and gossip elements, but with different content. Make them tricky to distinguish from the real one. Do not number the stories or add any prefixes."
+          content: "Generate one short, fictional but believable gossip story. The story should be 2-3 sentences and match the style of the real gossip. Use similar tone, structure, and gossip elements, but with different content. Make it tricky to distinguish from the real one."
         },
         {
           role: "user",
-          content: `Create two different fictional gossip stories about "${topic}" that closely match this style:
+          content: `Create a fictional gossip story about "${topic}" that closely matches this style:
           Real gossip: "${realGossip}"
           Style elements: "${styleAnalysis}"
           
-          Make the fake stories sound very similar but with different events/details.`
+          Make the fake story sound very similar but with different events/details.`
         }
       ],
       temperature: 0.8,
       max_tokens: 200,
     });
 
-    const fakeGossips = fakeGossipResponse.choices[0].message.content?.split('\n\n')
-      .filter(gossip => gossip?.trim()?.length > 0)
-      .map(gossip => gossip.replace(/^\d+\.\s*/, '').trim())
-      .slice(0, 2) || [];
+    const fakeGossip = fakeGossipResponse.choices[0].message.content?.trim() || '';
 
-    if (fakeGossips.length < 2) {
-      throw new Error('Failed to generate fake gossip stories');
+    if (!fakeGossip) {
+      throw new Error('Failed to generate fake gossip story');
     }
 
     // Create the stories array and shuffle
     const stories = [
       { content: realGossip, isReal: true, redditUrl: `https://reddit.com${bestPost.permalink}` },
-      ...fakeGossips.map(content => ({ content, isReal: false }))
+      { content: fakeGossip, isReal: false }
     ];
 
     // Shuffle the stories

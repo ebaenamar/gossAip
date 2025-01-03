@@ -75,6 +75,7 @@ export default function GossipGame() {
     setAttempts(0);
     setTimeLeft(60); // 1 minute
     setGameOver(false);
+    setStories([]); // Reset stories when starting game
     if (topic) {
       fetchGossip(topic);
     }
@@ -196,9 +197,9 @@ export default function GossipGame() {
       {loading ? (
         <div className="text-center py-8 text-white">Loading gossip...</div>
       ) : stories.length === 0 ? (
-        <div className="text-center py-8 space-y-4">
-          <p className="text-white/90 text-lg">Time to test your gossip radar! 🔍</p>
-          <p className="text-white/80">One of these stories is real, the other is AI-generated.<br/>Can you spot which is which? You have 60 seconds!</p>
+        <div className="text-center py-8 space-y-4 animate-fade-in">
+          <p className="text-white/90 text-xl font-medium">Time to test your gossip radar! 🔍</p>
+          <p className="text-white/80 text-lg">One of these stories is real, the other is AI-generated.<br/>Can you spot which is which? You have 60 seconds!</p>
         </div>
       ) : (
         <div className="space-y-6">
