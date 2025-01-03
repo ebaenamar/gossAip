@@ -126,30 +126,37 @@ export default function GossipGame() {
 
   if (gameOver) {
     const message = getScoreMessage(score);
+    const accuracy = attempts > 0 ? Math.round((score / attempts) * 100) : 0;
     
     return (
-      <div className="max-w-2xl mx-auto p-8 bg-white/10 backdrop-blur-lg rounded-lg shadow-xl border-2 border-purple-400/30">
-        <div className="text-center text-white space-y-6">
-          <h2 className="text-3xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-pink-400 text-transparent bg-clip-text">Game Over!</h2>
-          <div className="space-y-4 mb-8">
-            <p className="text-2xl font-medium whitespace-pre-line">{message}</p>
-            <div className="grid grid-cols-2 gap-4 max-w-md mx-auto mt-6">
-              <div className="bg-purple-900/40 p-4 rounded-lg">
-                <p className="text-lg">Score</p>
-                <p className="text-3xl font-bold text-purple-300">{score}</p>
-              </div>
-              <div className="bg-purple-900/40 p-4 rounded-lg">
-                <p className="text-lg">Attempts</p>
-                <p className="text-3xl font-bold text-purple-300">{attempts}</p>
-              </div>
+      <div className="max-w-4xl mx-auto p-8 bg-gradient-to-br from-purple-900/80 to-pink-900/80 backdrop-blur-lg rounded-2xl shadow-2xl border-2 border-purple-400/30">
+        <div className="text-center text-white space-y-8">
+          <h2 className="text-5xl font-bold mb-8 bg-gradient-to-r from-purple-400 via-pink-400 to-purple-400 text-transparent bg-clip-text animate-gradient">Game Over!</h2>
+          
+          <div className="grid grid-cols-3 gap-6 mb-8">
+            <div className="bg-white/10 p-6 rounded-xl backdrop-blur-md transform hover:scale-105 transition-all">
+              <div className="text-4xl font-bold text-purple-300 mb-2">{score}</div>
+              <div className="text-purple-200">Correct Guesses</div>
+            </div>
+            <div className="bg-white/10 p-6 rounded-xl backdrop-blur-md transform hover:scale-105 transition-all">
+              <div className="text-4xl font-bold text-pink-300 mb-2">{attempts}</div>
+              <div className="text-pink-200">Total Attempts</div>
+            </div>
+            <div className="bg-white/10 p-6 rounded-xl backdrop-blur-md transform hover:scale-105 transition-all">
+              <div className="text-4xl font-bold text-purple-300 mb-2">{accuracy}%</div>
+              <div className="text-purple-200">Accuracy</div>
             </div>
           </div>
-          <button
-            onClick={handleStartGame}
-            className="mt-8 px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all transform hover:scale-105 font-medium text-lg shadow-lg"
-          >
-            Play Again 🎭
-          </button>
+
+          <div className="space-y-6">
+            <p className="text-3xl font-medium whitespace-pre-line bg-gradient-to-r from-purple-200 to-pink-200 text-transparent bg-clip-text">{message}</p>
+            <button
+              onClick={handleStartGame}
+              className="mt-8 px-12 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:from-purple-700 hover:to-pink-700 transition-all transform hover:scale-105 hover:shadow-lg font-bold text-xl shadow-xl"
+            >
+              Play Again 🎭
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -157,20 +164,20 @@ export default function GossipGame() {
 
   if (!gameStarted) {
     return (
-      <div className="max-w-2xl mx-auto p-6 bg-white/10 backdrop-blur-lg rounded-lg shadow-xl">
-        <h1 className="text-3xl font-bold text-center mb-6 text-white">Gossip Game</h1>
+      <div className="max-w-2xl mx-auto p-6 bg-white/10 backdrop-blur-lg rounded-xl shadow-xl">
+        <h1 className="text-4xl font-bold text-center mb-6 bg-gradient-to-r from-purple-400 via-pink-400 to-purple-400 text-transparent bg-clip-text animate-gradient">Gossip Game</h1>
         <div className="space-y-4">
           <input
             type="text"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             placeholder="What's the tea about...?"
-            className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 backdrop-blur-sm"
+            className="w-full p-4 rounded-xl bg-white/20 text-white placeholder-white/50 backdrop-blur-sm border-2 border-white/10 focus:border-purple-400/50 outline-none transition-colors"
           />
           <button
             onClick={handleStartGame}
             disabled={!topic}
-            className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-6 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:from-purple-700 hover:to-pink-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 font-medium text-lg shadow-xl"
           >
             Start 1-Minute Tea Time! ☕️
           </button>
@@ -188,6 +195,11 @@ export default function GossipGame() {
       
       {loading ? (
         <div className="text-center py-8 text-white">Loading gossip...</div>
+      ) : stories.length === 0 ? (
+        <div className="text-center py-8 space-y-4">
+          <p className="text-white/90 text-lg">Time to test your gossip radar! 🔍</p>
+          <p className="text-white/80">One of these stories is real, the other is AI-generated.<br/>Can you spot which is which? You have 60 seconds!</p>
+        </div>
       ) : (
         <div className="space-y-6">
           <h2 className="text-xl font-semibold mb-4 text-white">Topic: {topic}</h2>
@@ -197,26 +209,35 @@ export default function GossipGame() {
               <div
                 key={index}
                 onClick={() => handleGuess(index)}
-                className={`p-4 rounded-lg cursor-pointer transition-colors ${
+                className={`p-6 rounded-xl backdrop-blur-md transition-all transform hover:scale-[1.02] cursor-pointer ${
                   revealed
                     ? index === correctIndex
-                      ? 'bg-green-500/20'
-                      : 'bg-red-500/20'
+                      ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-2 border-green-400/30'
+                      : 'bg-gradient-to-r from-red-500/20 to-pink-500/20 border-2 border-red-400/30'
                     : selectedIndex === index
-                    ? 'bg-purple-500/20'
-                    : 'bg-white/20 hover:bg-white/30'
+                    ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-2 border-purple-400/30'
+                    : 'bg-white/10 hover:bg-white/20 border-2 border-white/10'
                 }`}
               >
-                <p className="text-white">{story.content}</p>
+                <p className="text-white text-lg leading-relaxed">{story.content}</p>
                 {revealed && index === correctIndex && story.redditUrl && (
-                  <a
-                    href={story.redditUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-300 hover:text-blue-400 text-sm mt-2 block"
-                  >
-                    View on Reddit →
-                  </a>
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-green-300 font-medium">✨ This was the real gossip!</span>
+                    <a
+                      href={story.redditUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-300 hover:text-blue-400 flex items-center gap-2 transition-colors"
+                    >
+                      <span>View on Reddit</span>
+                      <span className="text-xl">→</span>
+                    </a>
+                  </div>
+                )}
+                {revealed && !story.isReal && (
+                  <div className="mt-4">
+                    <span className="text-red-300 font-medium">🎭 This was the AI-generated story!</span>
+                  </div>
                 )}
               </div>
             ))}
